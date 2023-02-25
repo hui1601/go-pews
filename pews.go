@@ -10,8 +10,10 @@ import (
 )
 
 type Station struct {
+	// divide by 100 before use
 	Longitude int `json:"longitude"`
-	Latitude  int `json:"latitude"`
+	// divide by 100 before use
+	Latitude int `json:"latitude"`
 }
 
 type EarthquakeMessage struct {
@@ -20,7 +22,9 @@ type EarthquakeMessage struct {
 	LastEarthquakeId    string `json:"lastEarthquakeId"`
 	MMI                 []int8 `json:"mmi"`
 	EarthquakeInfo      struct {
-		Longitude        int      `json:"longitude"`
+		// divide by 100 before use
+		Longitude int `json:"longitude"`
+		// divide by 100 before use
 		Latitude         int      `json:"latitude"`
 		EarthquakeId     string   `json:"earthquakeId"`
 		Magnitude        int8     `json:"magnitude"`
@@ -39,6 +43,13 @@ type SimulationData struct {
 	callTime     time.Time // when simulation started(when StartStimulation called, ex. 20230214081904)
 }
 
+const (
+	PhaseNormal = iota + 1
+	PhaseAlert
+	PhaseInfo
+	PhaseUpdateInfo
+)
+
 var simulation *SimulationData
 
 func byteToBinaryString(b byte) string {
@@ -49,6 +60,7 @@ func byteToBinaryString(b byte) string {
 	}
 	return binaryString
 }
+
 func byteArrayToBinaryString(byteArray []byte) string {
 	var binaryString string
 	for _, b := range byteArray {
@@ -65,13 +77,6 @@ func binaryStringToInt(binaryString string) int {
 	return result
 }
 
-const (
-	PhaseNormal = iota + 1
-	PhaseAlert
-	PhaseInfo
-	PhaseUpdateInfo
-)
-
 func kmaTimeString() string {
 	if simulation != nil {
 		timeDiff := int(time.Now().Unix() - simulation.callTime.Unix())
@@ -82,36 +87,6 @@ func kmaTimeString() string {
 		}
 	}
 	return time.Now().UTC().Add(-1 * time.Second).Format("20060102150405")
-}
-
-func GetStationList() ([]Station, error) {
-	var stations []Station
-	url := "https://www.weather.go.kr/pews/data/" + kmaTimeString() + ".s"
-	if simulation != nil {
-		url = fmt.Sprintf("https://www.weather.go.kr/pews/data/%s/%s.s", simulation.EarthquakeId, kmaTimeString())
-	}
-	var client http.Client
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer func(Body io.ReadCloser) {
-		_ = Body.Close()
-	}(resp.Body)
-	if resp.StatusCode == http.StatusOK {
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, err
-		}
-		// bodyBytes to binary string
-		binaryString := byteArrayToBinaryString(bodyBytes)
-		for i := 0; i < len(binaryString)/20*20; i += 20 {
-			latitude := binaryStringToInt(binaryString[i : i+10])
-			longitude := binaryStringToInt(binaryString[i+10 : i+20])
-			stations = append(stations, Station{Longitude: 12000 + longitude, Latitude: 3000 + latitude})
-		}
-	}
-	return stations, nil
 }
 
 func parseStationDataHeader(headerString string, message *EarthquakeMessage) {
@@ -168,10 +143,34 @@ func parseStationDataBody(bodyString string, stationLength int, message *Earthqu
 	}
 }
 
-// StartSimulation id: earthquake id, startTime: simulation data start time, duration: simulation data duration
-func StartSimulation(data SimulationData) {
-	simulation = &data
-	simulation.callTime = time.Now()
+func GetStationList() ([]Station, error) {
+	var stations []Station
+	url := "https://www.weather.go.kr/pews/data/" + kmaTimeString() + ".s"
+	if simulation != nil {
+		url = fmt.Sprintf("https://www.weather.go.kr/pews/data/%s/%s.s", simulation.EarthquakeId, kmaTimeString())
+	}
+	var client http.Client
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
+	if resp.StatusCode == http.StatusOK {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		// bodyBytes to binary string
+		binaryString := byteArrayToBinaryString(bodyBytes)
+		for i := 0; i < len(binaryString)/20*20; i += 20 {
+			latitude := binaryStringToInt(binaryString[i : i+10])
+			longitude := binaryStringToInt(binaryString[i+10 : i+20])
+			stations = append(stations, Station{Longitude: 12000 + longitude, Latitude: 3000 + latitude})
+		}
+	}
+	return stations, nil
 }
 
 func GetStationData(stationLength int) (*EarthquakeMessage, error) {
@@ -206,4 +205,9 @@ func GetStationData(stationLength int) (*EarthquakeMessage, error) {
 		}
 	}
 	return &message, nil
+}
+
+func StartSimulation(data SimulationData) {
+	simulation = &data
+	simulation.callTime = time.Now()
 }
