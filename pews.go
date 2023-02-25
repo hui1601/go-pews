@@ -16,7 +16,7 @@ type Station struct {
 
 type EarthquakeMessage struct {
 	StationUpdateNeeded bool   `json:"stationUpdateNeeded"`
-	Status              int8   `json:"status"`
+	Phase               int8   `json:"phase"`
 	LastEarthquakeId    string `json:"lastEarthquakeId"`
 	MMI                 []int8 `json:"mmi"`
 	EarthquakeInfo      struct {
@@ -34,7 +34,7 @@ type EarthquakeMessage struct {
 
 type SimulationData struct {
 	StartTime    time.Time // when simulation data starts(ex. 20211214081904)
-	EarthquakeId uint
+	EarthquakeId string
 	Duration     time.Duration
 	callTime     time.Time // when simulation started(when StartStimulation called, ex. 20230214081904)
 }
@@ -74,22 +74,21 @@ const (
 
 func kmaTimeString() string {
 	if simulation != nil {
-		timeDiff := time.Now().Unix() - simulation.callTime.Unix()
-		if timeDiff > simulation.Duration.Milliseconds() {
+		timeDiff := int(time.Now().Unix() - simulation.callTime.Unix())
+		if timeDiff > int(simulation.Duration.Seconds()) {
 			simulation = nil
 		} else {
-			return time.Unix(simulation.StartTime.Unix()+timeDiff, 0).UTC().Format("20060102150405")
+			return simulation.StartTime.Add(time.Duration(timeDiff-1) * time.Second).UTC().Format("20060102150405")
 		}
 	}
-	now := time.Now().UTC().Add(-1 * time.Second)
-	return now.Format("20060102150405")
+	return time.Now().UTC().Add(-1 * time.Second).Format("20060102150405")
 }
 
 func GetStationList() ([]Station, error) {
 	var stations []Station
 	url := "https://www.weather.go.kr/pews/data/" + kmaTimeString() + ".s"
 	if simulation != nil {
-		url = fmt.Sprintf("https://www.weather.go.kr/pews/data/%d/%s.s", simulation.EarthquakeId, kmaTimeString())
+		url = fmt.Sprintf("https://www.weather.go.kr/pews/data/%s/%s.s", simulation.EarthquakeId, kmaTimeString())
 	}
 	var client http.Client
 	resp, err := client.Get(url)
@@ -117,20 +116,20 @@ func GetStationList() ([]Station, error) {
 
 func parseStationDataHeader(headerString string, message *EarthquakeMessage) {
 	message.StationUpdateNeeded = headerString[0] == '1'
-	message.Status = (func(code string) int8 {
+	message.Phase = (func(code string) int8 {
 		// it's very awful
 		// why KMA does this?!!
 		switch code {
 		case "00":
-			return 1
+			return PhaseNormal
 		case "01":
-			return 4
+			return PhaseUpdateInfo
 		case "10":
-			return 2
+			return PhaseAlert
 		case "11":
-			return 3
+			return PhaseInfo
 		}
-		return 1
+		return PhaseNormal
 	})(headerString[1:3])
 	// data header is short when simulation.
 	if simulation == nil {
@@ -143,7 +142,7 @@ func parseStationDataBody(bodyString string, stationLength int, message *Earthqu
 		mmiConvertArray := []int8{1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 1, 1, 1}
 		message.MMI = append(message.MMI, mmiConvertArray[binaryStringToInt(bodyString[i*4:i*4+4])])
 	}
-	if message.Status == 2 || message.Status == 3 {
+	if message.Phase == PhaseAlert || message.Phase == PhaseInfo {
 		// very disgusting
 		var earthquakeInfoBinaryString = bodyString[len(bodyString)-600:]
 		message.EarthquakeInfo.Latitude = 3000 + binaryStringToInt(earthquakeInfoBinaryString[0:10])
@@ -172,7 +171,7 @@ func parseStationDataBody(bodyString string, stationLength int, message *Earthqu
 // StartSimulation id: earthquake id, startTime: simulation data start time, duration: simulation data duration
 func StartSimulation(data SimulationData) {
 	simulation = &data
-	simulation.callTime = time.Now().UTC().Add(-1 * time.Second)
+	simulation.callTime = time.Now()
 }
 
 func GetStationData(stationLength int) (*EarthquakeMessage, error) {
@@ -181,7 +180,7 @@ func GetStationData(stationLength int) (*EarthquakeMessage, error) {
 	headerSize := 32
 	url := "https://www.weather.go.kr/pews/data/" + kmaTimeString() + ".b"
 	if simulation != nil {
-		url = "https://www.weather.go.kr/pews/data/2021007178/" + kmaTimeString() + ".b"
+		url = "https://www.weather.go.kr/pews/data/" + simulation.EarthquakeId + "/" + kmaTimeString() + ".b"
 		headerSize = 8
 	}
 	resp, err := client.Get(url)
@@ -201,11 +200,8 @@ func GetStationData(stationLength int) (*EarthquakeMessage, error) {
 		header := binaryString[:headerSize]
 		body := binaryString[headerSize:]
 		parseStationDataHeader(header, &message)
-		if message.StationUpdateNeeded {
-			_, _ = GetStationList()
-		}
 		parseStationDataBody(body, stationLength, &message)
-		if message.Status == 2 || message.Status == 3 {
+		if message.Phase == PhaseAlert || message.Phase == PhaseInfo {
 			message.EarthquakeInfo.Epicenter = strings.Trim(string(bodyBytes[len(bodyBytes)-60:]), "\x00\x20")
 		}
 	}
