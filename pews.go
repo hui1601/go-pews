@@ -41,9 +41,6 @@ type SimulationData struct {
 
 var simulation *SimulationData
 
-func init() {
-}
-
 func byteToBinaryString(b byte) string {
 	// convert using bit shifting
 	var binaryString string
@@ -67,6 +64,13 @@ func binaryStringToInt(binaryString string) int {
 	}
 	return result
 }
+
+const (
+	PhaseNormal = iota + 1
+	PhaseAlert
+	PhaseInfo
+	PhaseUpdateInfo
+)
 
 func kmaTimeString() string {
 	if simulation != nil {
